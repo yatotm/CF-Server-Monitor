@@ -1,4 +1,4 @@
-# Cloudflare Workers 配置，线上已由deploy.yml接管，这里仅供本地测试
+# Cloudflare Workers 配置，生产环境由 Cloudflare Builds 部署
 name = "cf-server-monitor"
 main = "src/index.js"
 compatibility_date = "2024-12-01"
