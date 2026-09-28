@@ -5,7 +5,8 @@ permissions:
 
 on:
   schedule:
-    - cron: "0 0 * * *" # every day
+    - cron: "17 0 * * *" # 北京时间每天 08:17，避开 GitHub 整点高峰
+    - cron: "*/5 * * * *" # 临时验证定时触发，验证完成后删除
   workflow_dispatch:
 
 jobs:
