@@ -595,7 +595,7 @@ import { adminApi, login, startGithubLogin, logout as apiLogout, upgradeDatabase
 import { hasMultipleApiBases } from '../../utils/config.js'
 import { copyTextToClipboard } from '../../utils/clipboard.js'
 import { t, useTranslation } from '../../utils/i18n'
-import { PING_NODE_FIELDS, validatePingNode } from '../../utils/pingNode.js'
+import { PING_NODE_FIELDS, normalizePingMode, normalizeInstallPingMode, toSocketPingTarget, validatePingNode } from '../../utils/pingNode.js'
 import { normalizeDisplayMode, resolveDisplayMode } from '../../utils/displayMode.js'
 import { applyMikusThemeOptions } from '../../utils/themeOptions.js'
 import { FRONTEND_WS_TIMEOUT_MINUTES_MAX, HISTORY } from '../../utils/constants.js'
@@ -608,7 +608,7 @@ const route = useRoute()
 const router = useRouter()
 const appConfig = inject('appConfig', {})
 let startupConfigConsumed = false
-const AGENT_RELEASE_URL = 'https://api.github.com/repos/huilang-me/cfsm-agent/releases/latest'
+const AGENT_RELEASE_URL = 'https://api.github.com/repos/yatotm/cfsm-agent/releases/latest'
 const AGENT_RELEASE_FAILURE_TTL = 30 * 1000
 
 let cachedAgentReleaseVersion = ''
@@ -1154,7 +1154,7 @@ const getEffectiveConnectionMode = (value) => {
   return isWssReportEnabled.value ? connectionMode : 'http'
 }
 
-const getEffectivePingMode = (value) => value === 'icmp' ? 'icmp' : 'tcp'
+const getEffectivePingMode = (value) => normalizePingMode(value) || 'tcp'
 
 watch(isWssReportEnabled, (enabled) => {
   if (!enabled) {
@@ -1825,12 +1825,12 @@ const getUninstallCommand = () => {
   const proxy = isGo ? deleteGhProxy.value.trim() : ''
   if (isGo) {
     if (deleteTargetOs.value === 'windows') {
-      const ghUrl = buildGhRawUrl(proxy, '/huilang-me/cfsm-agent/main/install.ps1')
+      const ghUrl = buildGhRawUrl(proxy, '/yatotm/cfsm-agent/main/install.ps1')
       const proxyParam = proxy ? ` ${quotePowerShellArg(`--install-ghproxy=${proxy}`)}` : ''
       return `$script = "$env:TEMP\\install-cf-probe.ps1"; Invoke-WebRequest -Uri ${quotePowerShellArg(ghUrl)} -OutFile $script -UseBasicParsing; PowerShell -ExecutionPolicy Bypass -File $script uninstall${proxyParam}`
     }
     const sudoPrefix = deleteTargetOs.value === 'mac' ? 'sudo ' : ''
-    const ghUrl = buildGhRawUrl(proxy, '/huilang-me/cfsm-agent/main/install.sh')
+    const ghUrl = buildGhRawUrl(proxy, '/yatotm/cfsm-agent/main/install.sh')
     const proxyParam = proxy ? ` ${quotePosixShellArg(`--install-ghproxy=${proxy}`)}` : ''
     const uninstallCommand = `curl -fsSL ${quotePosixShellArg(ghUrl)} | ${sudoPrefix}sh -s -- uninstall${proxyParam}`
     if (deleteTargetOs.value === 'linux' && deleteInstallMode.value === 'cfsm-user') {
@@ -1965,7 +1965,8 @@ const getCustomInstallCommand = () => {
   const version = installVersion.value.trim()
   const effectiveConnectionMode = getEffectiveConnectionMode(connectionMode.value)
   const isDedicatedUserInstall = targetOs.value === 'linux' && installMode.value === 'cfsm-user'
-  const effectivePingMode = getEffectivePingMode(isDedicatedUserInstall ? 'tcp' : pingMode.value)
+  const effectivePingMode = normalizeInstallPingMode(pingMode.value, isDedicatedUserInstall)
+  const installNode = value => effectivePingMode === 'http' ? value : toSocketPingTarget(value)
   if (targetOs.value === 'windows') {
     const params = [
       'install'
@@ -1983,20 +1984,20 @@ const getCustomInstallCommand = () => {
       `-reset_day='${resetDay.value ?? 1}'`,
       `-auto_update='${autoUpdateFlag}'`
     )
-    if (customCt.value || explicitEmptyNodes.value.custom_ct) params.push(`-ct='${customCt.value}'`)
-    if (customCu.value || explicitEmptyNodes.value.custom_cu) params.push(`-cu='${customCu.value}'`)
-    if (customCm.value || explicitEmptyNodes.value.custom_cm) params.push(`-cm='${customCm.value}'`)
-    if (customBd.value || explicitEmptyNodes.value.custom_bd) params.push(`-bd='${customBd.value}'`)
-    if (node1.value || explicitEmptyNodes.value.node_1) params.push(`-node_1='${node1.value}'`); if (node2.value || explicitEmptyNodes.value.node_2) params.push(`-node_2='${node2.value}'`); if (node3.value || explicitEmptyNodes.value.node_3) params.push(`-node_3='${node3.value}'`); if (node4.value || explicitEmptyNodes.value.node_4) params.push(`-node_4='${node4.value}'`)
+    if (customCt.value || explicitEmptyNodes.value.custom_ct) params.push(quotePowerShellArg(`-ct=${installNode(customCt.value)}`))
+    if (customCu.value || explicitEmptyNodes.value.custom_cu) params.push(quotePowerShellArg(`-cu=${installNode(customCu.value)}`))
+    if (customCm.value || explicitEmptyNodes.value.custom_cm) params.push(quotePowerShellArg(`-cm=${installNode(customCm.value)}`))
+    if (customBd.value || explicitEmptyNodes.value.custom_bd) params.push(quotePowerShellArg(`-bd=${installNode(customBd.value)}`))
+    if (node1.value || explicitEmptyNodes.value.node_1) params.push(quotePowerShellArg(`-node_1=${installNode(node1.value)}`)); if (node2.value || explicitEmptyNodes.value.node_2) params.push(quotePowerShellArg(`-node_2=${installNode(node2.value)}`)); if (node3.value || explicitEmptyNodes.value.node_3) params.push(quotePowerShellArg(`-node_3=${installNode(node3.value)}`)); if (node4.value || explicitEmptyNodes.value.node_4) params.push(quotePowerShellArg(`-node_4=${installNode(node4.value)}`))
     if (networkInterface.value) params.push(`-interface='${networkInterface.value}'`)
     if (hasCorrectionValue(rxCorrection.value)) params.push(`-rx_correction='${rxCorrection.value}'`)
     if (hasCorrectionValue(txCorrection.value)) params.push(`-tx_correction='${txCorrection.value}'`)
-    const ghUrl = buildGhRawUrl(proxy, '/huilang-me/cfsm-agent/main/install.ps1')
+    const ghUrl = buildGhRawUrl(proxy, '/yatotm/cfsm-agent/main/install.ps1')
     return `$script = "$env:TEMP\\install-cf-probe.ps1"; Invoke-WebRequest -Uri ${quotePowerShellArg(ghUrl)} -OutFile $script -UseBasicParsing; PowerShell -ExecutionPolicy Bypass -File $script ${params.join(' ')}`
   }
   if (targetOs.value === 'docker') {
     const safeTag = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/.test(version) ? version : 'latest'
-    const image = `ghcr.io/huilang-me/cfsm-agent:${safeTag}`
+    const image = `ghcr.io/yatotm/cfsm-agent:${safeTag}`
     return [
       'docker run -d --name cf-probe --restart=unless-stopped --network=host \\',
       '  -v cf-probe-data:/data \\',
@@ -2018,15 +2019,15 @@ const getCustomInstallCommand = () => {
     `-reset_day=${resetDay.value ?? 1}`,
     `-auto_update=${autoUpdateFlag}`
   )
-  if (customCt.value || explicitEmptyNodes.value.custom_ct) params.push(`-ct='${customCt.value}'`)
-  if (customCu.value || explicitEmptyNodes.value.custom_cu) params.push(`-cu='${customCu.value}'`)
-  if (customCm.value || explicitEmptyNodes.value.custom_cm) params.push(`-cm='${customCm.value}'`)
-  if (customBd.value || explicitEmptyNodes.value.custom_bd) params.push(`-bd='${customBd.value}'`)
-  if (node1.value || explicitEmptyNodes.value.node_1) params.push(`-node_1='${node1.value}'`); if (node2.value || explicitEmptyNodes.value.node_2) params.push(`-node_2='${node2.value}'`); if (node3.value || explicitEmptyNodes.value.node_3) params.push(`-node_3='${node3.value}'`); if (node4.value || explicitEmptyNodes.value.node_4) params.push(`-node_4='${node4.value}'`)
+  if (customCt.value || explicitEmptyNodes.value.custom_ct) params.push(quotePosixShellArg(`-ct=${installNode(customCt.value)}`))
+  if (customCu.value || explicitEmptyNodes.value.custom_cu) params.push(quotePosixShellArg(`-cu=${installNode(customCu.value)}`))
+  if (customCm.value || explicitEmptyNodes.value.custom_cm) params.push(quotePosixShellArg(`-cm=${installNode(customCm.value)}`))
+  if (customBd.value || explicitEmptyNodes.value.custom_bd) params.push(quotePosixShellArg(`-bd=${installNode(customBd.value)}`))
+  if (node1.value || explicitEmptyNodes.value.node_1) params.push(quotePosixShellArg(`-node_1=${installNode(node1.value)}`)); if (node2.value || explicitEmptyNodes.value.node_2) params.push(quotePosixShellArg(`-node_2=${installNode(node2.value)}`)); if (node3.value || explicitEmptyNodes.value.node_3) params.push(quotePosixShellArg(`-node_3=${installNode(node3.value)}`)); if (node4.value || explicitEmptyNodes.value.node_4) params.push(quotePosixShellArg(`-node_4=${installNode(node4.value)}`))
   if (networkInterface.value) params.push(`-interface=${networkInterface.value}`)
   if (hasCorrectionValue(rxCorrection.value)) params.push(`-rx_correction=${rxCorrection.value}`)
   if (hasCorrectionValue(txCorrection.value)) params.push(`-tx_correction=${txCorrection.value}`)
-  const ghUrl = buildGhRawUrl(proxy, '/huilang-me/cfsm-agent/main/install.sh')
+  const ghUrl = buildGhRawUrl(proxy, '/yatotm/cfsm-agent/main/install.sh')
   const installCommand = `curl -fsSL ${quotePosixShellArg(ghUrl)} | sh -s -- ${params.join(' ')}`
   if (!isDedicatedUserInstall) return installCommand
 
@@ -2102,7 +2103,7 @@ const createEditFormFromServer = (server) => ({
     report_interval: server.report_interval || 60,
     wss_report_interval: server.wss_report_interval || 2,
     connection_mode: getEffectiveConnectionMode(server.connection_mode),
-    ping_mode: server.ping_mode === 'icmp' ? 'icmp' : 'tcp',
+    ping_mode: getEffectivePingMode(server.ping_mode),
     custom_ct: server.custom_ct ?? '',
     custom_cu: server.custom_cu ?? '',
     custom_cm: server.custom_cm ?? '',
@@ -2188,7 +2189,7 @@ const buildEditPayloadFromForm = (form) => {
       report_interval: form.report_interval,
       wss_report_interval: form.wss_report_interval,
       connection_mode: getEffectiveConnectionMode(form.connection_mode),
-      ping_mode: form.ping_mode === 'icmp' ? 'icmp' : 'tcp',
+      ping_mode: getEffectivePingMode(form.ping_mode),
       custom_ct: pingNodeValidation.values.custom_ct,
       custom_cu: pingNodeValidation.values.custom_cu,
       custom_cm: pingNodeValidation.values.custom_cm,
@@ -2255,7 +2256,7 @@ const saveEdit = async () => {
     report_interval: editForm.value.report_interval,
     wss_report_interval: editForm.value.wss_report_interval,
     connection_mode: getEffectiveConnectionMode(editForm.value.connection_mode),
-    ping_mode: editForm.value.ping_mode === 'icmp' ? 'icmp' : 'tcp',
+    ping_mode: getEffectivePingMode(editForm.value.ping_mode),
     custom_ct: pingNodeValidation.values.custom_ct,
     custom_cu: pingNodeValidation.values.custom_cu,
     custom_cm: pingNodeValidation.values.custom_cm,

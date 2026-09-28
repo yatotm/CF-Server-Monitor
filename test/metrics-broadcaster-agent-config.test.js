@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { AGENT_CONFIG_SCHEMA_VERSION } from '../src/utils/agentConfig.js';
 import { MetricsBroadcaster } from '../src/durable/MetricsBroadcaster.js';
 import { getHistoryMetrics, handleUpdateWebSocketUpgrade, handleWebSocketUpgrade } from '../src/handlers/update.js';
 import { buildAuthCookie, generateToken } from '../src/middleware/auth.js';
@@ -57,7 +58,7 @@ function makeSettingsDb(settingsSource) {
   };
 }
 
-function makeDescriptor(md5 = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', schemaVersion = 7) {
+function makeDescriptor(md5 = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', schemaVersion = AGENT_CONFIG_SCHEMA_VERSION) {
   const serialized = schemaVersion >= 7
     ? `collect_interval=2&report_interval=60&reset_day=1&schema_version=${schemaVersion}&custom_ct=&custom_cu=&custom_cm=&custom_bd=&interface=&node_1=&node_2=&node_3=&node_4=&connection_mode=auto&wss_report_interval=2&ping_mode=tcp`
     : schemaVersion >= 6
@@ -507,7 +508,7 @@ test('WSS agent config push uses string body and structured payload', () => {
         kind: 'agent-report',
         authenticated: true,
         serverId: 'server-1',
-        configSchema: '7',
+        configSchema: String(AGENT_CONFIG_SCHEMA_VERSION),
         configMd5: 'none'
       };
     },

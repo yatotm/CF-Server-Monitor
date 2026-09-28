@@ -84,7 +84,7 @@
         </div>
         <div class="config-row">
           <span class="config-label">{{ trans.pingMode }}</span>
-          <span class="config-value">{{ effectivePingMode === 'icmp' ? 'ICMP (root)' : 'TCP' }}</span>
+          <span class="config-value">{{ effectivePingMode === 'icmp' ? 'ICMP (root)' : effectivePingMode.toUpperCase() }}</span>
         </div>
         <div class="config-row">
           <span class="config-label">{{ trans.trafficResetDay }}</span>
@@ -150,6 +150,7 @@
 </template>
 
 <script setup>
+import { normalizeInstallPingMode } from '../../../utils/pingNode.js'
 import { computed, ref, watch } from 'vue'
 import HelpTooltip from '../../../components/HelpTooltip.vue'
 
@@ -225,10 +226,9 @@ const selectedGhProxy = computed({
 })
 
 const showCustomGhProxy = computed(() => selectedGhProxy.value === CUSTOM_GH_PROXY_VALUE)
-const effectivePingMode = computed(() => (
+const effectivePingMode = computed(() => normalizeInstallPingMode(
+  props.pingMode,
   props.targetOs === 'linux' && props.installMode === 'cfsm-user'
-    ? 'tcp'
-    : (props.pingMode === 'icmp' ? 'icmp' : 'tcp')
 ))
 
 watch(

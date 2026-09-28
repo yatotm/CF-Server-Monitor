@@ -1,12 +1,16 @@
 import { md5Hash } from './common.js';
 import { isWssReportConfigured } from './settings.js';
+import { normalizePingMode, sanitizePingNode, toSocketPingTarget } from './pingNode.js';
 
-export const AGENT_CONFIG_SCHEMA_VERSION = 7;
+export { normalizePingMode, sanitizePingNode, validatePingNode } from './pingNode.js';
+
+export const AGENT_CONFIG_SCHEMA_VERSION = 8;
 export const AGENT_CONFIG_LEGACY_SCHEMA_VERSION = 3;
 export const AGENT_CONFIG_CONNECTION_MODE_SCHEMA_VERSION = 4;
 export const AGENT_CONFIG_WSS_REPORT_INTERVAL_SCHEMA_VERSION = 5;
 export const AGENT_CONFIG_PING_MODE_SCHEMA_VERSION = 6;
 export const AGENT_CONFIG_EXTRA_NODES_SCHEMA_VERSION = 7;
+export const AGENT_CONFIG_HTTP_PING_SCHEMA_VERSION = 8;
 export const AGENT_CONFIG_SCHEMA_HEADER = 'X-Agent-Config-Schema';
 export const AGENT_CONFIG_MD5_HEADER = 'X-Agent-Config-Md5';
 export const MAX_TRAFFIC_CORRECTION_GB = 1000000;
@@ -14,17 +18,14 @@ export const CONNECTION_MODE_AUTO = 'auto';
 export const CONNECTION_MODE_HTTP = 'http';
 export const PING_MODE_TCP = 'tcp';
 export const PING_MODE_ICMP = 'icmp';
+export const PING_MODE_HTTP = 'http';
 export const DEFAULT_WSS_REPORT_INTERVAL = 2;
 
 const ALLOWED_COLLECT_INTERVALS = new Set([0, 1, 2, 5, 10]);
 const ALLOWED_REPORT_INTERVALS = new Set([30, 60, 120, 180]);
 const ALLOWED_WSS_REPORT_INTERVALS = new Set([1, 2, 3, 4, 5]);
 const ALLOWED_CONNECTION_MODES = new Set([CONNECTION_MODE_AUTO, CONNECTION_MODE_HTTP]);
-const ALLOWED_PING_MODES = new Set([PING_MODE_TCP, PING_MODE_ICMP]);
-const PING_NODE_HOST_PATTERN = /^[a-zA-Z0-9._-]+$/;
-const IPV4_PATTERN = /^(?:\d{1,3}\.){3}\d{1,3}$/;
-const IPV4_LIKE_PATTERN = /^(?:\d+\.){3}\d+$/;
-const IPV6_PATTERN = /^(?:(?:[0-9a-f]{1,4}:){1,7}[0-9a-f]{1,4}|(?:[0-9a-f]{1,4}:){1,7}:|(?:[0-9a-f]{1,4}:){1,6}:[0-9a-f]{1,4}|(?:[0-9a-f]{1,4}:){1,5}(?::[0-9a-f]{1,4}){1,2}|(?:[0-9a-f]{1,4}:){1,4}(?::[0-9a-f]{1,4}){1,3}|(?:[0-9a-f]{1,4}:){1,3}(?::[0-9a-f]{1,4}){1,4}|(?:[0-9a-f]{1,4}:){1,2}(?::[0-9a-f]{1,4}){1,5}|[0-9a-f]{1,4}:(?:(?::[0-9a-f]{1,4}){1,6})|:(?:(?::[0-9a-f]{1,4}){1,7}|:))$/i;
+const ALLOWED_PING_MODES = new Set([PING_MODE_TCP, PING_MODE_ICMP, PING_MODE_HTTP]);
 const NETWORK_INTERFACE_PATTERN = /^[A-Za-z0-9_.:-]+$/;
 
 function normalizeSchemaVersion(value) {
@@ -127,73 +128,6 @@ export function normalizeWssReportInterval(value) {
   return storedInteger(value, ALLOWED_WSS_REPORT_INTERVALS, DEFAULT_WSS_REPORT_INTERVAL);
 }
 
-function isValidIpv4(host) {
-  if (!IPV4_PATTERN.test(host)) return false;
-  return host.split('.').every(part => {
-    const number = Number(part);
-    return Number.isInteger(number) && number >= 0 && number <= 255;
-  });
-}
-
-function isValidHostname(host) {
-  if (!PING_NODE_HOST_PATTERN.test(host) || host.length > 50) return false;
-  if (IPV4_LIKE_PATTERN.test(host)) return false;
-  if (host.startsWith('.') || host.endsWith('.') || host.includes('..')) return false;
-  return host.split('.').every(label => {
-    if (!label || label.length > 63) return false;
-    return /^[a-zA-Z0-9_](?:[a-zA-Z0-9_-]*[a-zA-Z0-9_])?$/.test(label);
-  });
-}
-const isValidIpv6 = (host) => IPV6_PATTERN.test(host);
-
-export function validatePingNode(value) {
-  const raw = String(value ?? '').trim();
-  if (!raw) return { valid: true, value: '' };
-  if (raw.length > 60 || raw.includes('://') || /[\s/@?#\\]/.test(raw)) {
-    return { valid: false };
-  }
-
-  if (raw.startsWith('[')) {
-    const match = raw.match(/^\[([^\]]+)\](?::(\d{1,5}))?$/);
-    if (!match || !isValidIpv6(match[1])) return { valid: false };
-    const port = match[2] ? Number(match[2]) : null;
-    if (port !== null && (port < 1 || port > 65535)) return { valid: false };
-    return { valid: true, value: `[${match[1].toLowerCase()}]${port !== null ? `:${port}` : ''}` };
-  }
-
-  const colonCount = (raw.match(/:/g) || []).length;
-  if (colonCount > 1) {
-    const host = raw.toLowerCase();
-    return isValidIpv6(host) ? { valid: true, value: `[${host}]` } : { valid: false };
-  }
-
-  let host = raw;
-  let port = '';
-  if (colonCount === 1) {
-    const parts = raw.split(':');
-    host = parts[0];
-    port = parts[1];
-    if (!port || !/^\d{1,5}$/.test(port)) return { valid: false };
-    const portNumber = Number(port);
-    if (!Number.isInteger(portNumber) || portNumber < 1 || portNumber > 65535) {
-      return { valid: false };
-    }
-    port = String(portNumber);
-  }
-
-  host = host.toLowerCase();
-  if (!host) return { valid: false };
-  if (isValidIpv4(host) || isValidHostname(host)) {
-    return { valid: true, value: port ? `${host}:${port}` : host };
-  }
-  return { valid: false };
-}
-
-export function sanitizePingNode(value) {
-  const result = validatePingNode(value);
-  return result.valid ? result.value : '';
-}
-
 export function validateNetworkInterfaces(value) {
   const raw = String(value || '').trim();
   if (!raw) return { valid: true, value: '' };
@@ -236,17 +170,6 @@ export function normalizeConnectionMode(value) {
   return '';
 }
 
-export function normalizePingMode(value) {
-  const raw = String(value || '').trim().toLowerCase();
-  if (!raw || raw === PING_MODE_TCP) {
-    return PING_MODE_TCP;
-  }
-  if (raw === PING_MODE_ICMP) {
-    return PING_MODE_ICMP;
-  }
-  return '';
-}
-
 export function isValidTrafficCorrection(value) {
   let number;
   if (typeof value === 'number') {
@@ -277,7 +200,11 @@ export function buildAgentConfig(server, settings = null, schemaVersion = AGENT_
     ? resetNumber
     : 1;
 
+  const pingMode = normalizePingMode(server?.ping_mode) || PING_MODE_TCP;
+  const httpUnsupported = pingMode === PING_MODE_HTTP && version < AGENT_CONFIG_HTTP_PING_SCHEMA_VERSION;
   const resolveNode = (field) => {
+    // 旧探针不能执行 HTTP 探测，停用节点以免把 TCP 延迟误报为 HTTP 延迟。
+    if (httpUnsupported) return '';
     const serverValue = server?.[field];
     const hasServerField = server && Object.prototype.hasOwnProperty.call(server, field);
     // A stored 0 explicitly disables this node; blank/null inherits the global node.
@@ -285,7 +212,10 @@ export function buildAgentConfig(server, settings = null, schemaVersion = AGENT_
     const value = hasServerField && serverValue !== null && serverValue !== undefined && serverValue !== ''
       ? serverValue
       : settings?.[field] || '';
-    return sanitizePingNode(value);
+    const node = sanitizePingNode(value);
+    if (pingMode === PING_MODE_HTTP) return node;
+    const target = toSocketPingTarget(node);
+    return version < AGENT_CONFIG_HTTP_PING_SCHEMA_VERSION ? sanitizePingNode(target) : target;
   };
   const customCt = resolveNode('custom_ct');
   const customCu = resolveNode('custom_cu');
@@ -333,27 +263,30 @@ export function buildAgentConfig(server, settings = null, schemaVersion = AGENT_
   }
 
   if (version >= AGENT_CONFIG_PING_MODE_SCHEMA_VERSION) {
-    config.ping_mode = normalizePingMode(server?.ping_mode) || PING_MODE_TCP;
+    config.ping_mode = httpUnsupported ? PING_MODE_TCP : pingMode;
   }
 
   return config;
 }
 
 export function serializeAgentConfig(config) {
+  const encodeNode = value => config.schema_version >= AGENT_CONFIG_HTTP_PING_SCHEMA_VERSION
+    ? encodeURIComponent(value).replace(/[!'()*]/g, char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`)
+    : value;
   let serialized = `collect_interval=${config.collect_interval}` +
     `&report_interval=${config.report_interval}` +
     `&reset_day=${config.reset_day}` +
     `&schema_version=${config.schema_version}` +
-    `&custom_ct=${config.custom_ct}` +
-    `&custom_cu=${config.custom_cu}` +
-    `&custom_cm=${config.custom_cm}` +
-    `&custom_bd=${config.custom_bd}` +
+    `&custom_ct=${encodeNode(config.custom_ct)}` +
+    `&custom_cu=${encodeNode(config.custom_cu)}` +
+    `&custom_cm=${encodeNode(config.custom_cm)}` +
+    `&custom_bd=${encodeNode(config.custom_bd)}` +
     `&interface=${config.interface}`;
   if (Object.prototype.hasOwnProperty.call(config, 'node_1')) {
-    serialized += `&node_1=${config.node_1}` +
-      `&node_2=${config.node_2}` +
-      `&node_3=${config.node_3}` +
-      `&node_4=${config.node_4}`;
+    serialized += `&node_1=${encodeNode(config.node_1)}` +
+      `&node_2=${encodeNode(config.node_2)}` +
+      `&node_3=${encodeNode(config.node_3)}` +
+      `&node_4=${encodeNode(config.node_4)}`;
   }
   if (Object.prototype.hasOwnProperty.call(config, 'connection_mode')) {
     serialized += `&connection_mode=${config.connection_mode}`;

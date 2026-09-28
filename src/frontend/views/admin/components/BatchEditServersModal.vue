@@ -110,7 +110,9 @@
             <select v-model="form.ping_mode" class="form-select" :disabled="!enabled.ping_mode">
               <option value="tcp">TCP</option>
               <option value="icmp">ICMP (root)</option>
+              <option value="http">HTTP / HTTPS</option>
             </select>
+            <p v-if="form.ping_mode === 'http'" class="text-sm mt-1">{{ trans.pingModeHttpHint }}</p>
           </BatchEditField>
           <BatchEditField :enabled="enabled.interface" :label="trans.networkInterface" @toggle="toggleField('interface', $event)">
             <input type="text" v-model.trim="form.interface" class="form-input" :disabled="!enabled.interface" :placeholder="trans.networkInterfacePlaceholder">

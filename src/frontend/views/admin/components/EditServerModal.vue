@@ -144,7 +144,9 @@
           <select v-model="editForm.ping_mode" class="form-select">
             <option value="tcp">TCP</option>
             <option value="icmp">ICMP (root)</option>
+            <option value="http">HTTP / HTTPS</option>
           </select>
+          <p v-if="editForm.ping_mode === 'http'" class="text-sm mt-1">{{ trans.pingModeHttpHint }}</p>
         </div>
         <div class="form-group flex-1">
           <label class="form-label">{{ trans.networkInterface }}</label>
